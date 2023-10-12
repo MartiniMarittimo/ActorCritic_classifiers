@@ -55,7 +55,7 @@ class REINFORCE:
         self.epochs = 0
         self.epoch = 0
         self.actions_t = torch.zeros(3, dtype=torch.float64, device=self.device)
-        self.actions_tt = []
+        #self.actions_tt = []
         
         self.df_finale = self.task.dframe.copy()
         
@@ -102,7 +102,7 @@ class REINFORCE:
 
 # =============================================================================================================== 
     
-    def experience(self, n_trs, training=False):
+    def experience(self, n_trs, training=False, clsf_on_actor=True):
         
         #if not training:
         #    self.task.dframe.copy()
@@ -117,7 +117,6 @@ class REINFORCE:
         final_actions = []
         
         frates = torch.unsqueeze(torch.zeros(128, device=device), 1)
-        #print("here", frates.size())
         frates_col = np.zeros((128,1))
         
         entropies = torch.zeros(0, device=device)
@@ -160,20 +159,18 @@ class REINFORCE:
                 action = np.random.choice(np.arange(len(p)), p=p) # 0, 1, 2: fix, right, left
             else: 
                 action = np.random.choice(np.arange(len(p)), p=np.array([1/3, 1/3, 1/3])) 
-            actions.append(action)  
-            
+            actions.append(action)             
             if action == 0:
                 self.actions_t[0] = 1
             elif action == 1:
                 self.actions_t[1] = 1
             elif action == 2:
                 self.actions_t[2] = 1
-            self.actions_tt.append(self.actions_t.clone())
-            relu_trajs = self.actor_network.non_linearity(trajs[0][0])
+            #self.actions_tt.append(self.actions_t.clone())
             
-            #print(torch.unsqueeze(relu_trajs.clone().detach(), 1).size())
-            frates = torch.cat((frates, torch.unsqueeze(relu_trajs.clone().detach(), 1)), dim=1)
-            #print(frates.size())
+            relu_trajs = self.actor_network.non_linearity(trajs[0][0])      
+            if clsf_on_actor:
+                frates = torch.cat((frates, torch.unsqueeze(relu_trajs.clone().detach(), 1)), dim=1)
             
             in_for_critic = torch.unsqueeze(torch.unsqueeze(torch.cat((self.actions_t.clone(), relu_trajs.detach())),0),0)
             self.actions_t.zero_()
@@ -182,10 +179,15 @@ class REINFORCE:
             value, trajs_critic = self.critic_network(in_for_critic, return_dynamics=True, h0=h0_critic)
             values = torch.cat((values, value[0][0]))  
             
+            relu_trajs_critic = self.actor_network.non_linearity(trajs_critic[0][0])
+            if not clsf_on_actor:            
+                frates = torch.cat((frates, torch.unsqueeze(relu_trajs_critic.clone().detach(), 1)), dim=1)
+
             h0_actor = trajs  
             h0_critic = trajs_critic
 
             if info["new_trial"]:
+                
                 pp = action_probs[0][0].clone()
                 p_r = pp[1] / (pp[1] + pp[2])
                 p_l = pp[2] / (pp[1] + pp[2])
@@ -219,19 +221,13 @@ class REINFORCE:
                 frates = frates[:, 4:29]
                 frates = frates.mean(axis=1)
                 frates = frates.reshape(-1, 1)
-                #print(frates.shape)
                 frates_col = np.concatenate((frates_col, frates), axis=1)
-                #print(frates_col.shape)
-                copy = pd.DataFrame(frates)
-                #display(copy)
                 frates = torch.unsqueeze(torch.zeros(128, device=device), 1)
 
         errors = np.asarray(errors)
 
         log_action_probs = log_action_probs[1:]
         frates_col = frates_col[:, 2:]
-        copy = pd.DataFrame(frates_col)
-        #display(copy)
         final_actions = np.asarray(final_actions[1:])
         
         if not training:
@@ -243,7 +239,6 @@ class REINFORCE:
 
       
         return observations, rewards, actions, log_action_probs, entropies, values, trial_begins, errors, frates_col, final_actions
-        #      list, list, list, tensor(t_steps, actions), tensor(t_steps), list, list, list, list
          
 # =============================================================================================================== 
          
