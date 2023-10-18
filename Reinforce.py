@@ -102,7 +102,7 @@ class REINFORCE:
 
 # =============================================================================================================== 
     
-    def experience(self, n_trs, training=False, clsf_on_actor=True):
+    def experience(self, n_trs, training=False):
         
         #if not training:
         #    self.task.dframe.copy()
@@ -111,17 +111,24 @@ class REINFORCE:
         
         observations = []
         rewards = []
+        stimuli = []
         
         log_action_probs = torch.unsqueeze(torch.zeros(3, device=device), 0)
         actions = []
         final_actions = []
         
-        frates = torch.unsqueeze(torch.zeros(128, device=device), 1)
-        frates_col = np.zeros((128,1))
+        
+        frates_actor = torch.unsqueeze(torch.zeros(128, device=device), 1)
+        frates_col_actor = np.zeros((128,1))
+        frates_critic = torch.unsqueeze(torch.zeros(128, device=device), 1)
+        frates_col_critic = np.zeros((128,1))
         
         entropies = torch.zeros(0, device=device)
         #entropies = np.zeros(3)
         values = torch.zeros(0, device=device)
+        global_values = []
+        time_av_values = torch.zeros(0, device=device)
+        time_av_values_col = torch.zeros(0, device=device)
         
         #gt = []
         #coh = []
@@ -169,8 +176,7 @@ class REINFORCE:
             #self.actions_tt.append(self.actions_t.clone())
             
             relu_trajs = self.actor_network.non_linearity(trajs[0][0])      
-            if clsf_on_actor:
-                frates = torch.cat((frates, torch.unsqueeze(relu_trajs.clone().detach(), 1)), dim=1)
+            frates_actor = torch.cat((frates_actor, torch.unsqueeze(relu_trajs.clone().detach(), 1)), dim=1)
             
             in_for_critic = torch.unsqueeze(torch.unsqueeze(torch.cat((self.actions_t.clone(), relu_trajs.detach())),0),0)
             self.actions_t.zero_()
@@ -178,10 +184,10 @@ class REINFORCE:
             
             value, trajs_critic = self.critic_network(in_for_critic, return_dynamics=True, h0=h0_critic)
             values = torch.cat((values, value[0][0]))  
+            time_av_values = torch.cat((time_av_values, torch.unsqueeze(value[0][0].clone().detach(), 1)))  
             
             relu_trajs_critic = self.actor_network.non_linearity(trajs_critic[0][0])
-            if not clsf_on_actor:            
-                frates = torch.cat((frates, torch.unsqueeze(relu_trajs_critic.clone().detach(), 1)), dim=1)
+            frates_critic = torch.cat((frates_critic, torch.unsqueeze(relu_trajs_critic.clone().detach(), 1)), dim=1)
 
             h0_actor = trajs  
             h0_critic = trajs_critic
@@ -193,14 +199,18 @@ class REINFORCE:
                 p_l = pp[2] / (pp[1] + pp[2])
                 trial_entropy = torch.unsqueeze(- p_r*torch.log(p_r) - p_l*torch.log(p_l), 0)
                 entropies = torch.cat((entropies, trial_entropy))
-                
+               
+                stimuli.append(info["stimuli"])
+            
                 if actions[-2] == 1:    
                     final_actions.append(1)
                 elif actions[-2] == 2:
                     final_actions.append(-1)
                 else:
                     final_actions.append(0)
-                    
+                
+                global_values.append(info["global_value"])
+                
                 if info["gt"] != 0:
                     if actions[-2] != info["gt"]:
                         errors.append(trial_index)
@@ -216,19 +226,38 @@ class REINFORCE:
                 h0_actor.fill_(0)
                 h0_critic.fill_(0)
                 
-                frates = frates[:, 1:]
-                frates = np.asarray(frates)
-                frates = frates[:, 4:29]
-                frates = frates.mean(axis=1)
-                frates = frates.reshape(-1, 1)
-                frates_col = np.concatenate((frates_col, frates), axis=1)
-                frates = torch.unsqueeze(torch.zeros(128, device=device), 1)
+                frates_actor = frates_actor[:, 1:]
+                frates_actor = np.asarray(frates_actor)
+                frates_actor = frates_actor[:, 4:29]
+                frates_actor = frates_actor.mean(axis=1)
+                frates_actor = frates_actor.reshape(-1, 1)
+                frates_col_actor = np.concatenate((frates_col_actor, frates_actor), axis=1)
+                frates_actor = torch.unsqueeze(torch.zeros(128, device=device), 1)
+                
+                frates_critic = frates_critic[:, 1:]
+                frates_critic = np.asarray(frates_critic)
+                frates_critic = frates_critic[:, 4:29]
+                frates_critic = frates_critic.mean(axis=1)
+                frates_critic = frates_critic.reshape(-1, 1)
+                frates_col_critic = np.concatenate((frates_col_critic, frates_critic), axis=1)
+                frates_critic = torch.unsqueeze(torch.zeros(128, device=device), 1)
+                
+                time_av_values = time_av_values[4:29]
+                time_av_values = torch.unsqueeze(time_av_values.mean(), -1)
+                time_av_values_col = np.concatenate((time_av_values_col, time_av_values))
+                time_av_values = torch.zeros(0, device=device)
+
 
         errors = np.asarray(errors)
 
         log_action_probs = log_action_probs[1:]
-        frates_col = frates_col[:, 2:]
-        final_actions = np.asarray(final_actions[1:])
+        frates_col_actor = frates_col_actor[:, 1:]
+        frates_col_critic = frates_col_critic[:, 1:]
+        final_actions = np.asarray(final_actions)
+        global_values = np.asarray(global_values)
+        time_av_values_col = np.asarray(time_av_values_col)
+        stimuli = np.asarray(stimuli)
+
         
         if not training:
             self.df_finale -= self.df_finale
@@ -238,7 +267,7 @@ class REINFORCE:
             self.df_finale.values[:] = df_divisione
 
       
-        return observations, rewards, actions, log_action_probs, entropies, values, trial_begins, errors, frates_col, final_actions
+        return observations, rewards, actions, log_action_probs, entropies, values, trial_begins, errors, frates_col_actor, frates_col_critic, time_av_values_col, final_actions, global_values, stimuli
          
 # =============================================================================================================== 
          
@@ -274,7 +303,8 @@ class REINFORCE:
         optimizer_critic.zero_grad()
         
         observations, rewards, actions, log_action_probs, entropies, values,\
-        trial_begins, errors, frates, final_actions = self.experience(n_trs, training=True)
+        trial_begins, errors, frates_col_actor, frates_col_critic,\
+        time_av_values_col, final_actions, global_values = self.experience(n_trs, training=True)
 
         cum_rho = np.zeros(0)
         tau_r = np.inf  # Song et al. set this value to 10s only for reaction time tasks

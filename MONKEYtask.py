@@ -45,7 +45,9 @@ class RandomDotMotion(ngym.TrialEnv):
         self.v1 = 0
         self.v2 = 0
         self.p1 = 0
-        self.p2 = 0       
+        self.p2 = 0 
+        self.global_value = 0
+        self.stimuli = np.zeros(4)
         
         self.sigma = 0 #sigma / np.sqrt(self.dt)  # Input noise
         
@@ -107,6 +109,7 @@ class RandomDotMotion(ngym.TrialEnv):
         self.p2 = self.rng.choice(self.p2s)
         stim = np.array([self.v1, self.p1, self.v2, self.p2])
         self.add_ob(stim, 'stimulus', where='stimulus')
+        self.stimuli = stim
         
         #self.add_randn(0, self.sigma, period='stimulus', where='stimulus')
         
@@ -117,6 +120,13 @@ class RandomDotMotion(ngym.TrialEnv):
             gt = 1
         elif self.v1*self.p1 < self.v2*self.p2:
             gt = 2
+            
+        #if np.max((self.v1*self.p1, self.v2*self.p2)) <= 1:
+        #    self.global_value = -1
+        #else:
+        #    self.global_value = 1
+        
+        self.global_value = np.max((self.v1*self.p1, self.v2*self.p2))
                     
         # Trial info
         trial = {'ground_truth': gt}        
@@ -165,4 +175,5 @@ class RandomDotMotion(ngym.TrialEnv):
                     elif gt == 2:
                         self.dframe.at[str(self.v1*self.p1), str(self.v2*self.p2)] += 1
 
-        return self.ob_now, reward, False, {'new_trial': new_trial, 'gt': gt, 'coh': self.stored_coherence}
+        return self.ob_now, reward, False, {'new_trial': new_trial, 'gt': gt, 'coh': self.stored_coherence,\
+                                            "global_value": self.global_value, "stimuli": self.stimuli}
